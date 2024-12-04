@@ -1,20 +1,55 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import rough from 'roughjs';
-import { getStroke } from 'perfect-freehand';
+import rough from "roughjs/bundled/rough.esm";
+import getStroke from "perfect-freehand";
 import './App.css';
 
-const createElement = (id, x1, y1, x2, y2, type) => {
+const createElement = (id, x1, y1, x2, y2, type, options) => {
   switch (type) {
     case "pencil":
-      return { id, type, points: [{ x: x1, y: y1 }] };
+      return { id, type, points: [{ x: x1, y: y1 }], options };
     default:
       throw new Error(`Type not recognised: ${type}`);
   }
 };
 
+const onLine = (x1, y1, x2, y2, x, y, maxDistance = 1) => {
+  const a = { x: x1, y: y1 };
+  const b = { x: x2, y: y2 };
+  const c = { x, y };
+  const offset = distance(a, b) - (distance(a, c) + distance(b, c));
+  return Math.abs(offset) < maxDistance ? "inside" : null;
+};
+
+const positionWithinElement = (x, y, element) => {
+  const { type } = element;
+  switch (type) {
+    case "pencil":
+      const betweenAnyPoint = element.points.some((point, index) => {
+        const nextPoint = element.points[index + 1];
+        if (!nextPoint) return false;
+        return onLine(point.x, point.y, nextPoint.x, nextPoint.y, x, y, 5) != null;
+      });
+      return betweenAnyPoint ? "inside" : null;
+    default:
+      throw new Error(`Type not recognised: ${type}`);
+  }
+};
+
+const distance = (a, b) => Math.sqrt(Math.pow(a.x - b.x, 2) + Math.pow(a.y - b.y, 2));
+
 const getElementAtPosition = (x, y, elements) => {
   return elements
+    .map(element => ({ ...element, position: positionWithinElement(x, y, element) }))
     .find(element => element.position !== null);
+};
+
+const adjustElementCoordinates = element => {
+  const { x1, y1, x2, y2 } = element;
+  if (x1 < x2 || (x1 === x2 && y1 < y2)) {
+    return { x1, y1, x2, y2 };
+  } else {
+    return { x1: x2, y1: y2, x2: x1, y2: y1 };
+  }
 };
 
 const cursorForPosition = position => {
@@ -29,6 +64,24 @@ const cursorForPosition = position => {
       return "nesw-resize";
     default:
       return "move";
+  }
+};
+
+const resizedCoordinates = (clientX, clientY, position, coordinates) => {
+  const { x1, y1, x2, y2 } = coordinates;
+  switch (position) {
+    case "tl":
+    case "start":
+      return { x1: clientX, y1: clientY, x2, y2 };
+    case "tr":
+      return { x1, y1: clientY, x2: clientX, y2 };
+    case "bl":
+      return { x1: clientX, y1, x2, y2: clientY };
+    case "br":
+    case "end":
+      return { x1, y1, x2: clientX, y2: clientY };
+    default:
+      return null;
   }
 };
 
@@ -74,12 +127,10 @@ const getSvgPathFromStroke = stroke => {
 const drawElement = (roughCanvas, context, element) => {
   switch (element.type) {
     case "pencil":
-      const stroke = getSvgPathFromStroke(getStroke(element.points, {
-        size: 10,
-        thinning: 0,
-        smoothing: 0.4,
-        streamline: 0.5,
-      }));
+      context.fillStyle = element.options.color;
+      context.lineWidth = element.options.size;
+      context.lineThinning = element.options.thinning
+      const stroke = getSvgPathFromStroke(getStroke(element.points, { size: element.options.size }, { thinning: element.options.thinning }));
       context.fill(new Path2D(stroke));
       break;
     default:
@@ -87,36 +138,35 @@ const drawElement = (roughCanvas, context, element) => {
   }
 };
 
+const adjustmentRequired = type => [].includes(type);
+
 const App = () => {
   const [elements, setElements, undo, redo] = useHistory([]);
   const [action, setAction] = useState("none");
-  const [tool] = useState("pencil");
+  const [tool, setTool] = useState("pencil");
   const [selectedElement, setSelectedElement] = useState(null);
+  const [color, setColor] = useState("black");
+  const [size, setSize] = useState(9);
+  const [thinning] = useState(0.0);
   const textAreaRef = useRef();
-
 
   useLayoutEffect(() => {
     const canvas = document.getElementById("canvas");
     const context = canvas.getContext("2d");
-    const roughCanvas = rough.canvas(canvas);
-
     context.clearRect(0, 0, canvas.width, canvas.height);
 
-    context.save();
+    const roughCanvas = rough.canvas(canvas);
 
     elements.forEach(element => {
       if (action === "writing" && selectedElement.id === element.id) return;
       drawElement(roughCanvas, context, element);
     });
-    context.restore();
   }, [elements, action, selectedElement]);
 
   useEffect(() => {
     const undoRedoFunction = event => {
       if ((event.metaKey || event.ctrlKey) && event.key === "z") {
         if (event.shiftKey) {
-          redo();
-        } else {
           undo();
         }
       }
@@ -128,15 +178,11 @@ const App = () => {
     };
   }, [undo, redo]);
 
-  
-
   useEffect(() => {
     const textArea = textAreaRef.current;
     if (action === "writing") {
-      setTimeout(() => {
-        textArea.focus();
-        textArea.value = selectedElement.text;
-      }, 0);
+      textArea.focus();
+      textArea.value = selectedElement.text;
     }
   }, [action, selectedElement]);
 
@@ -154,17 +200,10 @@ const App = () => {
     setElements(elementsCopy, true);
   };
 
-  const getMouseCoordinates = event => {
-    const clientX = event.clientX;
-    const clientY = event.clientY;
-    return { clientX, clientY };
-  };
-
   const handleMouseDown = event => {
     if (action === "writing") return;
 
-    const { clientX, clientY } = getMouseCoordinates(event);
-
+    const { clientX, clientY } = event;
     if (tool === "selection") {
       const element = getElementAtPosition(clientX, clientY, elements);
       if (element) {
@@ -187,7 +226,7 @@ const App = () => {
       }
     } else {
       const id = elements.length;
-      const element = createElement(id, clientX, clientY, clientX, clientY, tool);
+      const element = createElement(id, clientX, clientY, clientX, clientY, tool, { color, size, thinning });
       setElements(prevState => [...prevState, element]);
       setSelectedElement(element);
 
@@ -196,9 +235,7 @@ const App = () => {
   };
 
   const handleMouseMove = event => {
-    const { clientX, clientY } = getMouseCoordinates(event);
-
-    
+    const { clientX, clientY } = event;
 
     if (tool === "selection") {
       const element = getElementAtPosition(clientX, clientY, elements);
@@ -207,22 +244,167 @@ const App = () => {
 
     if (action === "drawing") {
       const index = elements.length - 1;
-      const { x1, y1 } = elements[index];
-      updateElement(index, x1, y1, clientX, clientY, tool);
+      const { x1, y1, options } = elements[index];
+      updateElement(index, x1, y1, clientX, clientY, tool, options);
+    } else if (action === "moving") {
+      if (selectedElement.type === "pencil") {
+        const newPoints = selectedElement.points.map((_, index) => ({
+          x: clientX - selectedElement.xOffsets[index],
+          y: clientY - selectedElement.yOffsets[index],
+        }));
+        const elementsCopy = [...elements];
+        elementsCopy[selectedElement.id] = {
+          ...elementsCopy[selectedElement.id],
+          points: newPoints,
+        };
+        setElements(elementsCopy, true);
+      } else {
+        const {
+          id,
+          x1,
+          x2,
+          y1,
+          y2,
+          options: colorOptions,
+          type,
+          offsetX,
+          offsetY,
+        } = selectedElement;
+        const width = x2 - x1;
+        const height = y2 - y1;
+        const newX1 = clientX - offsetX;
+        const newY1 = clientY - offsetY;
+        const options = type === "text" ? { text: selectedElement.text } : {};
+        updateElement(id, newX1, newY1, newX1 + width, newY1 + height, type, {
+          ...options,
+          ...colorOptions,
+        });
+      }
+    } else if (action === "resizing") {
+      const { id, type, options, position, ...coordinates } = selectedElement;
+      const { x1, y1, x2, y2 } = resizedCoordinates(clientX, clientY, position, coordinates);
+      updateElement(id, x1, y1, x2, y2, type, options);
     }
   };
 
   const handleMouseUp = event => {
+    const { clientX, clientY } = event;
+    if (selectedElement) {
+      if (
+        selectedElement.type === "text" &&
+        clientX - selectedElement.offsetX === selectedElement.x1 &&
+        clientY - selectedElement.offsetY === selectedElement.y1
+      ) {
+        setAction("writing");
+        return;
+      }
+
+      const index = selectedElement.id;
+      const { id, type, options } = elements[index];
+      if ((action === "drawing" || action === "resizing") && adjustmentRequired(type)) {
+        const { x1, y1, x2, y2 } = adjustElementCoordinates(elements[index]);
+        updateElement(id, x1, y1, x2, y2, type, options);
+      }
+    }
+
+    if (action === "writing") return;
+
     setAction("none");
     setSelectedElement(null);
   };
 
+  const handleBlur = event => {
+    const { id, x1, y1, type } = selectedElement;
+    setAction("none");
+    setSelectedElement(null);
+    updateElement(id, x1, y1, null, null, type, { text: event.target.value });
+  };
+
   return (
     <div>
-      <div style={{ position: "fixed", zIndex: 2, bottom: 0, padding: 10 }}>
+      <div style={{ position: "fixed" }}>
+        <input
+          type="radio"
+          id="selection"
+          checked={tool === "selection"}
+          onChange={() => setTool("selection")}
+        />
+        <label htmlFor="selection">Selection</label>
+        <input
+          type="radio"
+          id="pencil"
+          checked={tool === "pencil"}
+          onChange={() => setTool("pencil")}
+        />
+        <label htmlFor="pencil">Pencil </label>
+        <br></br>
+        <br></br>
+        <label>
+          Size:
+          <input
+            type="range"
+            min="0"
+            max="50"
+            value={size}
+            onChange={e => setSize(Number(e.target.value))}
+            style={{
+              marginLeft: "0.5rem",
+              width: "200px",
+              verticalAlign: "middle",
+            }}
+          />
+        </label>
+        <br></br>
+        <br></br>
         <button onClick={undo}>Undo</button>
         <button onClick={redo}>Redo</button>
       </div>
+      <div style={{ position: "fixed", bottom: 0, padding: 10 }}>
+        <div style={{ display: "inline-block", marginLeft: "2rem" }}>
+          <label>
+            <input type="radio" checked={color === "black"} onChange={() => setColor("black")} />
+            Black
+          </label>
+          <label>
+            <input type="radio" checked={color === "red"} onChange={() => setColor("red")} />
+            Red
+          </label>
+          <label>
+            <input type="radio" checked={color === "green"} onChange={() => setColor("green")} />
+            Green
+          </label>
+          <label>
+            <input type="radio" checked={color === "blue"} onChange={() => setColor("blue")} />
+            Blue
+          </label>
+          <label>
+            <input type="radio" checked={color === "yellow"} onChange={() => setColor("yellow")} />
+            Yellow
+          </label>
+          <div>
+          </div>
+        </div>
+      </div>
+      {action === "writing" ? (
+        <textarea
+          ref={textAreaRef}
+          onBlur={handleBlur}
+          style={{
+            position: "fixed",
+            top: selectedElement.y1 - 2,
+            left: selectedElement.x1,
+            font: "24px sans-serif",
+            margin: 0,
+            padding: 0,
+            border: 0,
+            outline: 0,
+            resize: "auto",
+            overflow: "hidden",
+            whiteSpace: "pre",
+            background: "transparent",
+          }}
+        />
+      ) : null}
       <canvas
         id="canvas"
         width={window.innerWidth}
@@ -230,7 +412,6 @@ const App = () => {
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        style={{ position: "absolute", zIndex: 1 }}
       >
         Canvas
       </canvas>
