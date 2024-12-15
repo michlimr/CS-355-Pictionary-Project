@@ -147,7 +147,7 @@ $conn->close();
     <div id="container">
         <div id="header">
             <ul class="navbar">
-                <button class="button"> Create/End Game </button>
+                <button class="button" id="createGameButton"> Create Game </button> <!-- Added ID -->
                 <button class="button" id="addThemeButton"> Add Theme </button>
             </ul>
 
@@ -157,6 +157,7 @@ $conn->close();
         <div class="containertwo">
             <div class="playerlist">
                 <h3 style="color: white; margin-top: 0; text-align: left;">Players:</h3>
+                <ul id="playerListContainer" style="color: white; padding: 10px;"></ul>
             </div>
 
             <div class="canvas">
@@ -168,27 +169,55 @@ $conn->close();
     </div>
 
     <script>
-        // Get the add theme button by ID
+        // Get the buttons by their IDs
+        const createGameButton = document.getElementById("createGameButton");
+        const playerListContainer = document.getElementById("playerListContainer");
+
+        // Add a click event listener to the "Create Game" button
+        createGameButton.addEventListener("click", function() {
+            // Ask for the number of players
+            let numPlayers = parseInt(prompt("How many players are there?"));
+
+            // Validate the input for number of players
+            if (isNaN(numPlayers) || numPlayers <= 0) {
+                alert("Please enter a valid number of players.");
+                return;
+            }
+
+            // Clear previous player list (if any)
+            playerListContainer.innerHTML = "";
+
+            // Ask for player names and add them to the list
+            for (let i = 1; i <= numPlayers; i++) {
+                let playerName = prompt(`Enter the name for player ${i}:`);
+
+                // Validate the player's name
+                if (playerName && playerName.trim() !== "") {
+                    // Create a list item for each player
+                    const listItem = document.createElement("li");
+                    listItem.textContent = playerName.trim();  
+                    playerListContainer.appendChild(listItem);
+                } else {
+                    alert("Player name cannot be empty!");
+                    i--; 
+                }
+            }
+        });
+
         const addThemeButton = document.getElementById("addThemeButton");
-
-        // Add a click event listener to the button
         addThemeButton.addEventListener("click", function() {
-            // Prompt the user for a theme
             let theme = prompt("Type a theme you would like to add");
-
-            // If the user entered a theme
             if (theme && theme.trim() !== "") {
-                // Use Fetch API to send the theme to the server
-                fetch("<?php echo $_SERVER['PHP_SELF']; ?>", {  // Use the current PHP file
+                fetch("<?php echo $_SERVER['PHP_SELF']; ?>", {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/x-www-form-urlencoded"
                     },
-                    body: `theme=${encodeURIComponent(theme)}`  // Send the theme as form data
+                    body: `theme=${encodeURIComponent(theme)}`
                 })
-                .then(response => response.text())  // Get the response text
+                .then(response => response.text())
                 .then(data => {
-                    alert(data);  // Show an alert with the server's response
+                    alert(data);
                 })
                 .catch(error => {
                     console.error("Error:", error);
