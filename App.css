@@ -58,8 +58,10 @@ html, body {
   padding: 5px 20px;
   cursor: pointer;
   margin-right: 10px;
-  border: 3px solid #857e61
+  border: 3px solid #857e61;
+  border-radius: 5px;
 }
+
 .button:hover{
   background-color: #33658A;
 }
@@ -72,18 +74,19 @@ html, body {
 .playerlist{
   padding: 10px;
   margin: 10px;
-  height: 50vh;
-  width: 12.5%;
+  height: 85vh;
+  width: 25%;
   justify-content: space-between;
-  background: linear-gradient(to bottom, #33658A 0%, #33658A 10%, #86BBD8 10%, #86BBD8 100%);;
+  background: linear-gradient(to bottom, #33658A 0%, #33658A 6.5vh, #86BBD8 0vh, #86BBD8 100%);;
   font-weight: bold;
   border: 3px solid #857e61
 }
 .canvas{
-  position: "absolute";
-  width: "80%";
-  height: "60vh";
+  position: "relative";
+  width: "70%";
+  height: "80vh";
   margin: "0 auto";
+  background-color: "#f0f0f0";
   border: "1px solid #ccc";
 }
 .chatbox{
